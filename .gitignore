@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.env
+.env.*
+!.env.example
+.venv
+venv/
+env/
+.DS_Store
+.pytest_cache/
+.mypy_cache/
+
+# Node
+node_modules/
+dist/
+build/
+.env.local
+
+# Uploads
+uploads/*
+!uploads/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+
+# DB
+*.db
+*.sqlite3
+
+# Unrelated project artifacts
+KisanSaathi_Cloud_Native_Microservice_Architecture.pdf
+
+# Logs
+*.log
