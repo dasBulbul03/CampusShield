@@ -1,3 +1,4 @@
+import logging
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
@@ -7,6 +8,8 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.api.v1.api import api_router
 from app.db.base import get_db
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -26,6 +29,28 @@ upload_dir = Path(settings.UPLOAD_DIR)
 upload_dir.mkdir(parents=True, exist_ok=True)
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
+
+
+@app.on_event("startup")
+def startup_event():
+    """Operator-facing configuration check.
+
+    Seeding is intentionally NOT done here - it belongs to the migration job
+    (see backend/migrate.sh), because concurrent Fargate tasks seeding
+    Department.name (unique) would race and crash-loop.
+    """
+    if not settings.GEMINI_API_KEY:
+        logger.warning(
+            "GEMINI_API_KEY is not set. Complaint analysis will use the "
+            "deterministic fallback classifier instead of Gemini. Set "
+            "GEMINI_API_KEY to enable AI analysis - see backend/.env.example."
+        )
+    if settings.SECRET_KEY.startswith("changeme"):
+        logger.warning(
+            "SECRET_KEY is still the documented placeholder. Every JWT in "
+            "this deployment is signed with a publicly known secret. Set a "
+            "unique SECRET_KEY before accepting real users."
+        )
 
 
 @app.get("/health")

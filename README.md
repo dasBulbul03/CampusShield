@@ -70,11 +70,8 @@ cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env
 ```
 
-4. Add your Gemini API key to `.env`:
-```bash
-GEMINI_API_KEY=your_gemini_api_key_here
-GEMINI_MODEL=gemini-3.8-flash
-```
+4. *(Optional)* Add your Gemini API key — see [Gemini API key](#gemini-api-key-optional) below.
+   Skipping this is fine: the app starts and analysis uses the built-in fallback classifier.
 
 5. Start all services:
 ```bash
@@ -85,6 +82,36 @@ docker compose up --build
 - Frontend: http://localhost:8080
 - Backend API: http://localhost:8000
 - API Docs: http://localhost:8000/docs
+- Health: http://localhost:8000/health · readiness: http://localhost:8000/health/ready
+
+### Gemini API key (optional)
+
+**No key ships with this repository.** `GEMINI_API_KEY` is empty in every
+`.env.example`, empty by default in `app/core/config.py`, and empty by default in
+`docker-compose.yml`. Whoever deploys CampusShield supplies their own.
+
+| | |
+|---|---|
+| **Key left empty** | App starts normally. Complaint analysis uses the deterministic keyword-based fallback classifier. The API logs a `WARNING` at startup so it is not silently ignored. |
+| **Key set** | Analysis goes to Gemini, with enum validation and automatic fallback if Gemini returns anything invalid or unavailable. |
+
+To enable Gemini:
+
+1. Create a key at https://aistudio.google.com/apikey
+2. Paste it into your local `.env` and/or `backend/.env`:
+
+```bash
+GEMINI_API_KEY=<your key>
+GEMINI_MODEL=gemini-3.8-flash
+```
+
+> `.env` files are gitignored; `.env.example` files are not. **Never put a real
+> key in an `.env.example`, a Dockerfile, docker-compose.yml, or any `VITE_*`
+> variable** — Vite inlines `VITE_*` values into the public JS bundle, so a
+> secret there would ship to every browser.
+
+If you still have a placeholder `SECRET_KEY`, the API also warns at startup:
+JWTs signed with a publicly known secret are forgeable.
 
 ### Local Development
 
