@@ -82,7 +82,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Trivy scan - fail on CRITICAL
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: campusshield-backend:ci
           format: table
@@ -92,7 +92,7 @@ jobs:
 
       - name: Trivy scan - report HIGH (informational, does not fail)
         if: always()
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: campusshield-backend:ci
           format: table
