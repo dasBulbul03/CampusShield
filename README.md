@@ -113,6 +113,36 @@ GEMINI_MODEL=gemini-3.8-flash
 If you still have a placeholder `SECRET_KEY`, the API also warns at startup:
 JWTs signed with a publicly known secret are forgeable.
 
+### Makefile (recommended)
+
+The repo ships a Makefile covering the common workflows. Run `make` for the
+full list.
+
+```bash
+make setup          # .env files + backend venv + frontend node_modules
+make up             # build and start the whole stack (backend, frontend, postgres)
+make down           # stop it (data kept)
+
+make dev-backend    # uvicorn --reload on :8000
+make dev-frontend   # vite on :8080
+make migrate        # alembic upgrade head, then seed departments + demo users
+
+make test           # backend pytest + eslint + production frontend build
+make lint           # eslint only
+make cov            # pytest with a coverage report
+make scan           # Trivy scan of the backend image (fails on CRITICAL)
+
+make health         # probe /health and /health/ready
+make doctor         # report what is installed and what is missing
+```
+
+Two guards worth knowing:
+
+- Anything needing the virtualenv fails with a pointer to `make setup` rather
+  than a stack trace.
+- `make destroy` refuses to run unless you pass `CONFIRM=yes`, because it
+  deletes the Postgres volume and all local data.
+
 ### Local Development
 
 #### Backend
