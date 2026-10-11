@@ -1,0 +1,13 @@
+aws_region                    = "us-east-1"
+project_name                  = "campusshield"
+environment                   = "staging"
+vpc_cidr                      = "10.30.0.0/16"
+enable_services               = false
+desired_count                 = 1
+database_instance_class       = "db.t3.small"
+database_backup_retention_days = 7
+multi_az_database             = false
+multi_az_nat                  = false
+secret_recovery_window_days   = 7
+log_retention_days            = 30
+gemini_model                  = "gemini-3.8-flash"

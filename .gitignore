@@ -36,3 +36,14 @@ KisanSaathi_Cloud_Native_Microservice_Architecture.pdf
 
 # Logs
 *.log
+
+# Terraform local state and provider cache. Commit .terraform.lock.hcl,
+# but never state files or environment-specific tfvars.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+terraform.tfvars
+terraform.tfvars.json
+*.auto.tfvars
+*.auto.tfvars.json

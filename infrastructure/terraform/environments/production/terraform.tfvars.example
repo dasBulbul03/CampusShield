@@ -1,0 +1,14 @@
+aws_region                    = "us-east-1"
+project_name                  = "campusshield"
+environment                   = "production"
+vpc_cidr                      = "10.40.0.0/16"
+acm_certificate_arn           = "REPLACE_WITH_VALID_ACM_CERTIFICATE_ARN"
+enable_services               = false
+desired_count                 = 2
+database_instance_class       = "db.t3.medium"
+database_backup_retention_days = 7
+multi_az_database             = true
+multi_az_nat                  = true
+secret_recovery_window_days   = 30
+log_retention_days            = 90
+gemini_model                  = "gemini-3.8-flash"

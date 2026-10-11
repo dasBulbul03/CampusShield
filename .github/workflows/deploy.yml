@@ -1,0 +1,207 @@
+name: Deploy CampusShield to AWS
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Build, migrate, and deploy
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+      BACKEND_ECR_REPOSITORY: ${{ vars.BACKEND_ECR_REPOSITORY }}
+      FRONTEND_ECR_REPOSITORY: ${{ vars.FRONTEND_ECR_REPOSITORY }}
+      ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+      BACKEND_SERVICE: ${{ vars.BACKEND_SERVICE }}
+      FRONTEND_SERVICE: ${{ vars.FRONTEND_SERVICE }}
+      PRIVATE_SUBNET_IDS: ${{ vars.PRIVATE_SUBNET_IDS }}
+      BACKEND_SECURITY_GROUP_ID: ${{ vars.BACKEND_SECURITY_GROUP_ID }}
+      APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+    steps:
+      - name: Check out successful CI commit
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Validate GitHub environment configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$AWS_REGION" ]] || { echo "::error::Missing AWS_REGION"; exit 1; }
+          [[ -n "$AWS_ROLE_ARN" ]] || { echo "::error::Missing AWS_ROLE_ARN"; exit 1; }
+          [[ -n "$BACKEND_ECR_REPOSITORY" ]] || { echo "::error::Missing BACKEND_ECR_REPOSITORY"; exit 1; }
+          [[ -n "$FRONTEND_ECR_REPOSITORY" ]] || { echo "::error::Missing FRONTEND_ECR_REPOSITORY"; exit 1; }
+          [[ -n "$ECS_CLUSTER" ]] || { echo "::error::Missing ECS_CLUSTER"; exit 1; }
+          [[ -n "$BACKEND_SERVICE" ]] || { echo "::error::Missing BACKEND_SERVICE"; exit 1; }
+          [[ -n "$FRONTEND_SERVICE" ]] || { echo "::error::Missing FRONTEND_SERVICE"; exit 1; }
+          [[ -n "$PRIVATE_SUBNET_IDS" ]] || { echo "::error::Missing PRIVATE_SUBNET_IDS"; exit 1; }
+          [[ -n "$BACKEND_SECURITY_GROUP_ID" ]] || { echo "::error::Missing BACKEND_SECURITY_GROUP_ID"; exit 1; }
+          [[ -n "$APP_BASE_URL" ]] || { echo "::error::Missing APP_BASE_URL"; exit 1; }
+          if [[ "${BACKEND_ECR_REPOSITORY}" != *.amazonaws.com/* || "${FRONTEND_ECR_REPOSITORY}" != *.amazonaws.com/* ]]; then
+            echo "::error::ECR repository variables must contain full ECR repository URIs."
+            exit 1
+          fi
+
+      - name: Configure AWS credentials with GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@b47578312673ae6fa5b5096b330d9fbac3d116df # v4.2.1
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: campusshield-${{ github.run_id }}
+
+      - name: Verify AWS identity and ECS services are enabled
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws sts get-caller-identity
+          for service in "$BACKEND_SERVICE" "$FRONTEND_SERVICE"; do
+            desired=$(aws ecs describe-services \
+              --cluster "$ECS_CLUSTER" \
+              --services "$service" \
+              --query 'services[0].desiredCount' \
+              --output text)
+            if [[ "$desired" == "None" || "$desired" == "0" ]]; then
+              echo "::error::ECS service $service is not enabled. Set enable_services=true and apply Terraform after bootstrap."
+              exit 1
+            fi
+          done
+
+      - name: Log in to Amazon ECR
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin "${BACKEND_ECR_REPOSITORY%%/*}"
+
+      - name: Build and push immutable images
+        env:
+          IMAGE_TAG: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --platform linux/amd64 -t "${BACKEND_ECR_REPOSITORY}:${IMAGE_TAG}" ./backend
+          docker build --platform linux/amd64 -t "${FRONTEND_ECR_REPOSITORY}:${IMAGE_TAG}" ./frontend
+          docker push "${BACKEND_ECR_REPOSITORY}:${IMAGE_TAG}"
+          docker push "${FRONTEND_ECR_REPOSITORY}:${IMAGE_TAG}"
+          echo "IMAGE_TAG=${IMAGE_TAG}" >> "$GITHUB_ENV"
+
+      - name: Register task definitions using the new images
+        shell: bash
+        run: |
+          set -euo pipefail
+          backend_current=$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" --services "$BACKEND_SERVICE" \
+            --query 'services[0].taskDefinition' --output text)
+          frontend_current=$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" --services "$FRONTEND_SERVICE" \
+            --query 'services[0].taskDefinition' --output text)
+
+          aws ecs describe-task-definition --task-definition "$backend_current" \
+            --query taskDefinition > /tmp/backend-current.json
+          jq --arg image "${BACKEND_ECR_REPOSITORY}:${IMAGE_TAG}" '
+            del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                .compatibilities, .registeredAt, .registeredBy, .deregisteredAt, .tags)
+            | .containerDefinitions |= map(if .name == "backend" then .image = $image else . end)
+          ' /tmp/backend-current.json > /tmp/backend-task-definition.json
+          BACKEND_TASK_DEFINITION=$(aws ecs register-task-definition \
+            --cli-input-json file:///tmp/backend-task-definition.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+
+          aws ecs describe-task-definition --task-definition "$frontend_current" \
+            --query taskDefinition > /tmp/frontend-current.json
+          jq --arg image "${FRONTEND_ECR_REPOSITORY}:${IMAGE_TAG}" '
+            del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                .compatibilities, .registeredAt, .registeredBy, .deregisteredAt, .tags)
+            | .containerDefinitions |= map(if .name == "frontend" then .image = $image else . end)
+          ' /tmp/frontend-current.json > /tmp/frontend-task-definition.json
+          FRONTEND_TASK_DEFINITION=$(aws ecs register-task-definition \
+            --cli-input-json file:///tmp/frontend-task-definition.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+
+          echo "BACKEND_TASK_DEFINITION=${BACKEND_TASK_DEFINITION}" >> "$GITHUB_ENV"
+          echo "FRONTEND_TASK_DEFINITION=${FRONTEND_TASK_DEFINITION}" >> "$GITHUB_ENV"
+
+      - name: Run database migration task
+        shell: bash
+        run: |
+          set -euo pipefail
+          subnet_json=$(printf '%s' "$PRIVATE_SUBNET_IDS" | jq -Rc 'split(",") | map(gsub(" "; ""))')
+          network_config=$(jq -cn \
+            --argjson subnets "$subnet_json" \
+            --arg security_group "$BACKEND_SECURITY_GROUP_ID" \
+            '{awsvpcConfiguration:{subnets:$subnets,securityGroups:[$security_group],assignPublicIp:"DISABLED"}}')
+
+          task_arn=$(aws ecs run-task \
+            --cluster "$ECS_CLUSTER" \
+            --task-definition "$BACKEND_TASK_DEFINITION" \
+            --launch-type FARGATE \
+            --network-configuration "$network_config" \
+            --started-by "gh-${GITHUB_RUN_ID}" \
+            --overrides '{"containerOverrides":[{"name":"backend","command":["./migrate.sh"]}]}' \
+            --query 'tasks[0].taskArn' --output text)
+          if [[ -z "$task_arn" || "$task_arn" == "None" ]]; then
+            echo "::error::ECS did not start the migration task."
+            exit 1
+          fi
+          aws ecs wait tasks-stopped --cluster "$ECS_CLUSTER" --tasks "$task_arn"
+          exit_code=$(aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$task_arn" \
+            --query "tasks[0].containers[?name=='backend'].exitCode | [0]" --output text)
+          if [[ "$exit_code" != "0" ]]; then
+            aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$task_arn"
+            echo "::error::Database migration task failed with exit code ${exit_code}."
+            exit 1
+          fi
+
+      - name: Deploy backend and wait for a stable service
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$BACKEND_SERVICE" \
+            --task-definition "$BACKEND_TASK_DEFINITION" >/dev/null
+          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$BACKEND_SERVICE"
+
+      - name: Deploy frontend and wait for a stable service
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$FRONTEND_SERVICE" \
+            --task-definition "$FRONTEND_TASK_DEFINITION" >/dev/null
+          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$FRONTEND_SERVICE"
+
+      - name: Smoke-test the deployed app
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 18); do
+            if curl --fail --silent --show-error "${APP_BASE_URL%/}/health/ready" \
+              && curl --fail --silent --show-error "${APP_BASE_URL%/}/"; then
+              echo "Deployment smoke tests passed."
+              exit 0
+            fi
+            echo "Smoke test attempt ${attempt}/18 failed; retrying in 10 seconds."
+            sleep 10
+          done
+          echo "::error::Deployment health checks did not pass."
+          exit 1

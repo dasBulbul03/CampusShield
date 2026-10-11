@@ -45,6 +45,19 @@ CampusShield is an AI-powered campus safety and grievance management platform bu
 ### DevOps
 - Docker & Docker Compose
 - GitHub Actions (`.github/workflows/ci.yml`) - backend tests + frontend lint/build
+- Terraform-managed AWS starting stack under `infrastructure/terraform/` (manual planning/apply only)
+
+### AWS deployment status
+
+The Terraform root configuration provisions a two-AZ VPC, ALB, ECS/Fargate,
+private RDS PostgreSQL, private S3 evidence storage, ECR, Secrets Manager,
+CloudWatch logs, and ECS IAM roles. It is not applied automatically. Read
+[`infrastructure/terraform/README.md`](infrastructure/terraform/README.md)
+before planning: defaults create billable resources, services start disabled
+until bootstrap images and database migrations are ready, and Terraform state
+contains generated secrets. Configure secure state storage and review the full
+plan before any apply. Local Compose continues to store evidence on disk;
+AWS ECS uses S3 through its task role.
 
 ## AI Architecture
 

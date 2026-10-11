@@ -1,11 +1,12 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
-from uuid import uuid4
 import os
 from pathlib import Path
+from urllib.parse import quote
 
 from app.core.config import settings
 from app.core.constants import ComplaintStatus, UserRole
@@ -16,8 +17,15 @@ from app.models.complaint import Complaint, ComplaintAnalysis, ComplaintUpdate, 
 from app.schemas.complaint import ComplaintCreate, ComplaintUpdate as ComplaintUpdateSchema
 from app.services.ai_service import AIService
 from app.services.complaint_service import generate_complaint_number
+from app.services.evidence_storage import (
+    EvidenceStorageError,
+    delete_evidence,
+    get_evidence,
+    save_evidence,
+)
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 ALLOWED_EXTENSIONS = {
     ext.strip().lower().lstrip(".")
@@ -98,24 +106,29 @@ def create_complaint(
     db.refresh(complaint)
 
     if evidence:
-        upload_dir = Path(settings.UPLOAD_DIR)
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        safe_name = f"{complaint.id}_{uuid4().hex}.{evidence_ext}"
-        file_path = upload_dir / safe_name
-        with open(file_path, "wb") as f:
-            evidence.file.seek(0)
-            for chunk in iter(lambda: evidence.file.read(1024 * 1024), b""):
-                f.write(chunk)
+        evidence.file.seek(0, os.SEEK_END)
+        evidence_size = evidence.file.tell()
+        evidence.file.seek(0)
+        try:
+            file_path, safe_name = save_evidence(evidence.file, evidence_ext, complaint.id)
+        except EvidenceStorageError as exc:
+            raise HTTPException(status_code=503, detail="Evidence storage is temporarily unavailable") from exc
+
         ev = Evidence(
             complaint_id=complaint.id,
             filename=safe_name,
             original_filename=evidence_original,
-            file_path=str(file_path),
-            file_size=os.path.getsize(file_path),
+            file_path=file_path,
+            file_size=evidence_size,
             file_type=evidence.content_type or "application/octet-stream",
         )
         db.add(ev)
-        db.commit()
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            delete_evidence(file_path)
+            raise
 
     return {"id": complaint.id, "complaint_number": complaint.complaint_number}
 
@@ -216,16 +229,22 @@ def download_evidence(
     if not ev:
         raise HTTPException(status_code=404, detail="Evidence not found")
 
-    file_path = Path(ev.file_path)
-    if not file_path.is_absolute():
-        file_path = Path(settings.UPLOAD_DIR) / file_path.name
-    if not file_path.is_file():
+    try:
+        stored_evidence = get_evidence(ev.file_path)
+    except EvidenceStorageError as exc:
+        raise HTTPException(status_code=503, detail="Evidence storage is temporarily unavailable") from exc
+    if stored_evidence is None:
         raise HTTPException(status_code=404, detail="Evidence file is missing")
 
-    return FileResponse(
-        path=file_path,
-        filename=ev.original_filename or file_path.name,
-        media_type=ev.file_type or "application/octet-stream",
+    original_filename = ev.original_filename or ev.filename
+    media_type = ev.file_type or "application/octet-stream"
+    if isinstance(stored_evidence, Path):
+        return FileResponse(path=stored_evidence, filename=original_filename, media_type=media_type)
+
+    return StreamingResponse(
+        stored_evidence.iter_chunks(chunk_size=64 * 1024),
+        media_type=media_type,
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(original_filename)}"},
     )
 
 

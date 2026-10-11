@@ -19,9 +19,11 @@ class Settings(BaseSettings):
     # Gemini AI
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-3.8-flash"
+    SEED_DEMO_USERS: bool = True
 
     # File upload
     UPLOAD_DIR: str = "uploads"
+    S3_BUCKET: str = ""
     MAX_FILE_SIZE: int = 10 * 1024 * 1024  # 10MB
     ALLOWED_EXTENSIONS: str = "jpg,jpeg,png,pdf,doc,docx"
 
