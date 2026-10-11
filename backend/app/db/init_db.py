@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from app.db.base import SessionLocal
 from app.core.security import get_password_hash
 from app.core.constants import UserRole
@@ -7,6 +8,13 @@ from app.models.complaint import Department
 
 
 def init_db():
+    """Idempotent seed: reference departments and demo users.
+
+    Seeding runs as part of the migration job, NOT on app startup. Running it
+    concurrently in N Fargate tasks races on Department.name (unique) and would
+    crash-loop the losers of that race. IntegrityError is still tolerated in
+    case a local run overlaps another seeded process.
+    """
     db = SessionLocal()
     try:
         # Create departments
@@ -42,5 +50,11 @@ def init_db():
             )
             db.add(student)
         db.commit()
+    except IntegrityError:
+        db.rollback()
     finally:
         db.close()
+
+
+if __name__ == "__main__":
+    init_db()

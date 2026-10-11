@@ -1,0 +1,25 @@
+# Never copy secrets into the image — .gitignore does NOT protect Docker.
+.env
+.env.*
+!.env.example
+
+# Build/CI artifacts
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+*.db
+*.sqlite3
+
+# Not needed at runtime; CI runs pytest directly, not inside the container.
+tests/
+
+# Runtime data is mounted or on S3, never baked in.
+uploads/
+
+.git
+.github
+.DS_Store
+*.log

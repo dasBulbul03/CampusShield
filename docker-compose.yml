@@ -32,6 +32,9 @@ services:
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.8-flash}
       CORS_ORIGINS: http://localhost:5173,http://localhost:8080,http://localhost
       UPLOAD_DIR: uploads
+      # Local-only convenience. Production runs ./migrate.sh as a separate
+      # one-off ECS task instead - see backend/entrypoint.sh.
+      RUN_MIGRATIONS: "1"
     volumes:
       - ./backend/uploads:/app/uploads
     ports:

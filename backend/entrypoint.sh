@@ -1,8 +1,19 @@
 #!/bin/sh
+# Starts the API server only.
+#
+# Migrations and seeding are deliberately NOT done here: in production this
+# image runs as N concurrent Fargate tasks, and letting every task run
+# `alembic upgrade head` races on DDL and hides schema failures behind
+# restart loops. The CD workflow runs them once, as a separate one-off task
+# via ./migrate.sh, and aborts the deployment if that task fails.
+#
+# Local docker-compose sets RUN_MIGRATIONS=1 to keep `docker compose up` a
+# one-command experience against an empty database.
 set -e
 
-echo "Applying database migrations..."
-alembic upgrade head
+if [ "${RUN_MIGRATIONS:-0}" = "1" ]; then
+  echo "RUN_MIGRATIONS=1 -> applying schema and seed data..."
+  ./migrate.sh
+fi
 
-echo "Starting Uvicorn..."
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+exec ./run.sh

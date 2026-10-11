@@ -1,4 +1,6 @@
-FROM node:18-alpine as build
+# Node 20 matches the version CI lints and builds with (.github/workflows/ci.yml),
+# so the image build is byte-comparable to the CI artifact.
+FROM node:20-alpine AS build
 
 WORKDIR /app
 
@@ -8,7 +10,7 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-FROM nginx:alpine
+FROM nginx:1.27-alpine
 
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
