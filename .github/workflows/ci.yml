@@ -57,3 +57,45 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  # Separate job on purpose: it never gates or replaces the two jobs above,
+  # so a scanner outage or a base-image CVE cannot block a test run.
+  # The frontend image is nginx + static assets; the backend image carries
+  # the Python dependency tree, so that is what we gate on.
+  backend-image-scan:
+    name: Backend image scan (Trivy)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image (load only, never pushed from CI)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          load: true
+          tags: campusshield-backend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trivy scan - fail on CRITICAL
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: campusshield-backend:ci
+          format: table
+          exit-code: "1"
+          severity: CRITICAL
+          ignore-unfixed: true
+
+      - name: Trivy scan - report HIGH (informational, does not fail)
+        if: always()
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: campusshield-backend:ci
+          format: table
+          exit-code: "0"
+          severity: HIGH
+          ignore-unfixed: true
