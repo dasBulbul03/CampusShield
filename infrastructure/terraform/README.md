@@ -40,6 +40,26 @@ or share it unencrypted. Use the state-bucket bootstrap below before applying
 the main stack; it creates a private, encrypted, versioned S3 bucket for state.
 The bootstrap state itself is local and contains no application secrets.
 
+## Who owns the task definitions
+
+Both ECS services declare `lifecycle { ignore_changes = [task_definition] }`.
+After the first `terraform apply`, GitHub Actions owns task-definition
+revisions: each deploy reads the running definition, swaps in the new image
+digest, and registers a new revision.
+
+The consequence is easy to miss. **Terraform can no longer change a task
+definition.** Adding or editing an environment variable, a secret mapping, a
+health check, or CPU/memory in `main.tf` has no effect on an already-deployed
+service. To change one you must either:
+
+1. Force it back through Terraform - remove the `ignore_changes` entry,
+   `terraform apply`, then re-add it; or
+2. Apply the change in AWS directly and let it stand until the next deploy
+   clones it.
+
+The health check is the sharpest example: it is baked in at first apply, so a
+broken one keeps being copied forward by every subsequent deploy.
+
 ## Prepare and plan
 
 Use AWS IAM Identity Center or an assumed role rather than root credentials or

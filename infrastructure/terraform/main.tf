@@ -744,6 +744,14 @@ resource "aws_ecs_task_definition" "frontend" {
       hostPort      = 8080
       protocol      = "tcp"
     }]
+    environment = [
+      # The ALB listener rule forwards /api/* straight to the backend target
+      # group, so nginx never proxies it here and this value is never used.
+      # It exists because the same image serves docker-compose, which sets it
+      # to the Compose DNS name. "localhost" keeps nginx able to start in
+      # Fargate, where no such DNS name exists. See frontend/nginx.conf.template.
+      { name = "BACKEND_UPSTREAM", value = "localhost" }
+    ]
     logConfiguration = {
       logDriver = "awslogs"
       options = {
@@ -753,7 +761,10 @@ resource "aws_ecs_task_definition" "frontend" {
       }
     }
     healthCheck = {
-      command     = ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      # nginxinc/nginx-unprivileged listens on 8080, not 80. Pointing this at
+      # port 80 fails every check, so the service never reaches steady state
+      # and the circuit breaker rolls back every frontend deployment.
+      command     = ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1"]
       interval    = 30
       timeout     = 5
       retries     = 3

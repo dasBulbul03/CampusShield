@@ -47,6 +47,10 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: campusshield-frontend
+    environment:
+      # Rendered into nginx.conf.template. Only docker-compose needs a real
+      # upstream; behind the ALB, /api/* is routed before reaching nginx.
+      BACKEND_UPSTREAM: campusshield-backend:8000
     ports:
       - "8080:8080"
     depends_on:
