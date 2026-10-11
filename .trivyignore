@@ -1,0 +1,42 @@
+# Trivy ignore file, read by every Trivy scan in CI (image and config).
+# Each entry must carry a written justification and a review date. An ignore
+# without a reason is how a real finding gets buried.
+
+# AWS-0104 - Security group rule allows unrestricted egress to any IP address.
+#
+# Applies to aws_security_group.backend and aws_security_group.frontend
+# (egress cidr_blocks = ["0.0.0.0/0"]).
+#
+# Justification: both task types run in *private* subnets behind the ALB and
+# reach the internet only through the NAT gateway. They must be able to call:
+#   - the Gemini API (public internet, address range not enumerable)
+#   - AWS control-plane endpoints (Secrets Manager, CloudWatch Logs, ECR, S3)
+#     which do not all have gateway endpoints in every region
+# Restricting egress to a static allow-list is not achievable for these
+# destinations, and inbound is already constrained: the ALB security group is
+# the only path in, and the database security group admits only the backend.
+#
+# Ingress is NOT ignored here and remains subject to the scan.
+#
+# Revisit if: VPC endpoints (secretsmanager / logs / ecr.api / s3) are added so
+# that only Gemini needs public egress, at which point egress can be narrowed
+# to 443/TCP and this entry should be deleted.
+AWS-0104
+
+# AWS-0054 - Listener for application load balancer does not use HTTPS.
+#
+# Justification: only the dev and staging defaults omit acm_certificate_arn
+# and therefore create an HTTP listener. This is not left to the scanner to
+# enforce - Terraform already refuses it. variables.tf declares
+#
+#   condition = var.environment != "production" || var.acm_certificate_arn != ""
+#
+# so `environment = "production"` cannot be planned or applied without a
+# certificate, and the HTTP listener resource is not created at all when one
+# is supplied. The scanner cannot tell dev from production in a single
+# configuration, so suppressing it here is safe.
+#
+# Revisit if: the production path is ever made reachable without that
+# validation - at which point this entry must be deleted, not merely
+# re-documented.
+AWS-0054
