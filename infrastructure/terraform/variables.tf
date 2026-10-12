@@ -205,6 +205,28 @@ variable "github_repository" {
   }
 }
 
+variable "github_owner_id" {
+  description = <<-EOT
+    Numeric GitHub owner ID. GitHub's OIDC subject claim now qualifies the
+    owner and repository with their numeric IDs, producing
+    repo:owner@123456/name@789012:environment:dev rather than the older
+    repo:owner/name:environment:dev. The IDs survive renames and transfers,
+    so they are what AWS should match on. Find it with:
+    gh api users/OWNER --jq .id   (or orgs/OWNER for an organisation)
+  EOT
+  type        = string
+  default     = "194465775"
+}
+
+variable "github_repository_id" {
+  description = <<-EOT
+    Numeric GitHub repository ID. See github_owner_id. Find it with:
+    gh api repos/OWNER/REPO --jq .id
+  EOT
+  type        = string
+  default     = "1413688818"
+}
+
 variable "github_environment" {
   description = "GitHub Actions environment whose OIDC subject may assume the deployment role."
   type        = string

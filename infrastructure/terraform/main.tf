@@ -8,6 +8,21 @@ locals {
   name = "${var.project_name}-${var.environment}"
   azs  = slice(data.aws_availability_zones.available.names, 0, 2)
 
+  github_owner_name = split("/", var.github_repository)[0]
+  github_repo_name  = split("/", var.github_repository)[1]
+
+  # GitHub qualifies the owner and repository with their numeric IDs in the
+  # OIDC subject, e.g. repo:owner@12345/name@67890:environment:dev. Matching
+  # the unqualified form silently fails with
+  # "Not authorized to perform sts:AssumeRoleWithWebIdentity". Both forms are
+  # accepted so a caller who has not filled in the IDs still works.
+  github_oidc_subjects = var.github_repository_id == "" ? [
+    "repo:${var.github_repository}:environment:${var.github_environment}"
+    ] : [
+    "repo:${local.github_owner_name}@${var.github_owner_id}/${local.github_repo_name}@${var.github_repository_id}:environment:${var.github_environment}",
+    "repo:${var.github_repository}:environment:${var.github_environment}",
+  ]
+
   tags = {
     Project     = var.project_name
     Environment = var.environment
@@ -478,7 +493,9 @@ resource "aws_iam_role" "github_actions" {
       Condition = {
         StringEquals = {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-          "token.actions.githubusercontent.com:sub" = "repo:${var.github_repository}:environment:${var.github_environment}"
+        }
+        StringLike = {
+          "token.actions.githubusercontent.com:sub" = local.github_oidc_subjects
         }
       }
     }]
