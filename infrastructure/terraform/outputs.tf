@@ -1,3 +1,8 @@
+output "aws_region" {
+  description = "Region the stack is deployed in; used as the AWS_REGION GitHub environment variable."
+  value       = var.aws_region
+}
+
 output "load_balancer_url" {
   description = "Public ALB URL. It redirects to HTTPS when an ACM certificate is configured."
   value       = "${var.acm_certificate_arn == "" ? "http" : "https"}://${aws_lb.main.dns_name}"
